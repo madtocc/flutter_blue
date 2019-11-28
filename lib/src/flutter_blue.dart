@@ -73,53 +73,53 @@ class FlutterBlue {
     List<Guid> withDevices = const [],
     Duration timeout,
   }) async* {
+    if (_isScanning.value == false) {
     var settings = protos.ScanSettings.create()
       ..androidScanMode = scanMode.value
       ..serviceUuids.addAll(withServices.map((g) => g.toString()).toList());
+      // throw Exception('Another scan is already in progress.');
 
-    if (_isScanning.value == true) {
-      throw Exception('Another scan is already in progress.');
-    }
 
-    // Emit to isScanning
-    _isScanning.add(true);
+      // Emit to isScanning
+      _isScanning.add(true);
 
-    final killStreams = <Stream>[];
-    killStreams.add(_stopScanPill);
-    if (timeout != null) {
-      killStreams.add(Observable.timer(null, timeout));
-    }
-
-    // Clear scan results list
-    _scanResults.add(<ScanResult>[]);
-
-    try {
-      await _channel.invokeMethod('startScan', settings.writeToBuffer());
-    } catch (e) {
-      print('Error starting scan.');
-      _stopScanPill.add(null);
-      _isScanning.add(false);
-      throw e;
-    }
-
-    yield* Observable(FlutterBlue.instance._methodStream
-            .where((m) => m.method == "ScanResult")
-            .map((m) => m.arguments))
-        .takeUntil(Observable.merge(killStreams))
-        .doOnDone(stopScan)
-        .map((buffer) => new protos.ScanResult.fromBuffer(buffer))
-        .map((p) {
-      final result = new ScanResult.fromProto(p);
-      final list = _scanResults.value;
-      int index = list.indexOf(result);
-      if (index != -1) {
-        list[index] = result;
-      } else {
-        list.add(result);
+      final killStreams = <Stream>[];
+      killStreams.add(_stopScanPill);
+      if (timeout != null) {
+        killStreams.add(Observable.timer(null, timeout));
       }
-      _scanResults.add(list);
-      return result;
-    });
+
+      // Clear scan results list
+      _scanResults.add(<ScanResult>[]);
+
+      try {
+        await _channel.invokeMethod('startScan', settings.writeToBuffer());
+      } catch (e) {
+        print('Error starting scan. $e');
+        _stopScanPill.add(null);
+        _isScanning.add(false);
+        // throw e;
+      }
+
+      yield* Observable(FlutterBlue.instance._methodStream
+              .where((m) => m.method == "ScanResult")
+              .map((m) => m.arguments))
+          .takeUntil(Observable.merge(killStreams))
+          .doOnDone(stopScan)
+          .map((buffer) => new protos.ScanResult.fromBuffer(buffer))
+          .map((p) {
+        final result = new ScanResult.fromProto(p);
+        final list = _scanResults.value;
+        int index = list.indexOf(result);
+        if (index != -1) {
+          list[index] = result;
+        } else {
+          list.add(result);
+        }
+        _scanResults.add(list);
+        return result;
+      });
+    }
   }
 
   Future startScan({

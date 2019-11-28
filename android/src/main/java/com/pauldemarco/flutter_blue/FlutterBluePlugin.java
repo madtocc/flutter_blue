@@ -51,13 +51,13 @@ import io.flutter.plugin.common.MethodChannel.MethodCallHandler;
 import io.flutter.plugin.common.MethodChannel.Result;
 import io.flutter.plugin.common.PluginRegistry.Registrar;
 import io.flutter.plugin.common.PluginRegistry.RequestPermissionsResultListener;
-
+import io.flutter.plugin.common.PluginRegistry;
 
 /** FlutterBluePlugin */
-public class FlutterBluePlugin implements MethodCallHandler, RequestPermissionsResultListener  {
-    private static final String TAG = "FlutterBluePlugin";
+ public class FlutterBluePlugin implements MethodCallHandler, RequestPermissionsResultListener, PluginRegistry.ActivityResultListener {    private static final String TAG = "FlutterBluePlugin";
     private static final String NAMESPACE = "plugins.pauldemarco.com/flutter_blue";
     private static final int REQUEST_FINE_LOCATION_PERMISSIONS = 1452;
+    private static final int REQUEST_ENABLE_BT = 1453;
     static final private UUID CCCD_ID = UUID.fromString("00002902-0000-1000-8000-00805f9b34fb");
     private final Registrar registrar;
     private final Activity activity;
@@ -76,6 +76,7 @@ public class FlutterBluePlugin implements MethodCallHandler, RequestPermissionsR
     public static void registerWith(Registrar registrar) {
         final FlutterBluePlugin instance = new FlutterBluePlugin(registrar);
         registrar.addRequestPermissionsResultListener(instance);
+        registrar.addActivityResultListener(instance);
     }
 
     FlutterBluePlugin(Registrar r){
@@ -97,6 +98,14 @@ public class FlutterBluePlugin implements MethodCallHandler, RequestPermissionsR
         }
 
         switch (call.method) {
+            case "checkLocationPermission":
+            {
+
+            }
+            case "checkAvailability":{
+                
+            }
+
             case "setLogLevel":
             {
                 int logLevelIndex = (int)call.arguments;
@@ -147,18 +156,6 @@ public class FlutterBluePlugin implements MethodCallHandler, RequestPermissionsR
 
             case "startScan":
             {
-                if (ContextCompat.checkSelfPermission(activity, Manifest.permission.ACCESS_FINE_LOCATION)
-                        != PackageManager.PERMISSION_GRANTED) {
-                    ActivityCompat.requestPermissions(
-                            activity,
-                            new String[] {
-                                    Manifest.permission.ACCESS_FINE_LOCATION
-                            },
-                            REQUEST_FINE_LOCATION_PERMISSIONS);
-                    pendingCall = call;
-                    pendingResult = result;
-                    break;
-                }
                 startScan(call, result);
                 break;
             }
@@ -552,7 +549,7 @@ public class FlutterBluePlugin implements MethodCallHandler, RequestPermissionsR
                 startScan(pendingCall, pendingResult);
             } else {
                 pendingResult.error(
-                        "no_permissions", "flutter_blue plugin requires location permissions for scanning", null);
+                        "location", "flutter_blue plugin requires location permissions for scanning", null);
                 pendingResult = null;
                 pendingCall = null;
             }
@@ -646,6 +643,34 @@ public class FlutterBluePlugin implements MethodCallHandler, RequestPermissionsR
     };
 
     private void startScan(MethodCall call, Result result) {
+        // check location permission android 10 upwards
+        pendingCall = call;
+        pendingResult = result;
+        if (ContextCompat.checkSelfPermission(activity, Manifest.permission.ACCESS_FINE_LOCATION)
+                        != PackageManager.PERMISSION_GRANTED) {
+                    ActivityCompat.requestPermissions(
+                            activity,
+                            new String[] {
+                                    Manifest.permission.ACCESS_FINE_LOCATION
+                            },
+                            REQUEST_FINE_LOCATION_PERMISSIONS);
+
+        }
+        else{
+            if(mBluetoothAdapter != null){
+                if (!mBluetoothAdapter.isEnabled()) {
+                    log(LogLevel.DEBUG, "[startScan] disable");
+                    activity.startActivityForResult(new Intent(BluetoothAdapter.ACTION_REQUEST_ENABLE), REQUEST_ENABLE_BT);
+                } else {
+                    log(LogLevel.DEBUG, "[startScan] enable");
+                    startScanInternal(call, result);
+                }
+            }
+        }
+
+    }
+
+    private void startScanInternal(MethodCall call, Result result) {
         byte[] data = call.arguments();
         Protos.ScanSettings settings;
         try {
@@ -660,6 +685,24 @@ public class FlutterBluePlugin implements MethodCallHandler, RequestPermissionsR
             result.error("startScan", e.getMessage(), e);
         }
     }
+
+    @Override
+    public boolean onActivityResult(int requestCode, int resultCode, Intent intent) {
+        if (requestCode == REQUEST_ENABLE_BT) {
+            if (resultCode == Activity.RESULT_OK) {
+                startScanInternal(pendingCall, pendingResult);
+            }
+            else{
+                pendingResult.error(
+                        "ble", "flutter_blue plugin requires ble enable for scanning", null);
+                pendingResult = null;
+                pendingCall = null;
+            }
+            return true;
+        }
+        return false;
+    }
+
 
     private void stopScan() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
